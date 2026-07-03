@@ -16,10 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if tag is on main
+      - name: Determine release channel
+        id: channel
         run: |
-          git fetch origin main
-          git merge-base --is-ancestor ${{ github.sha }} origin/main || exit 1
+          if [[ "${GITHUB_REF_NAME}" == *-dev* ]]; then
+            echo "branch=dev" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=main" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if tag is on ${{ steps.channel.outputs.branch }}
+        run: |
+          git fetch origin ${{ steps.channel.outputs.branch }}
+          git merge-base --is-ancestor ${{ github.sha }} origin/${{ steps.channel.outputs.branch }} || exit 1
 
       - uses: actions/setup-node@v4
         with:
@@ -37,4 +48,4 @@ jobs:
       - run: npm run build --if-present
 
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --tag ${{ steps.channel.outputs.npm_tag }}

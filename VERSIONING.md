@@ -14,12 +14,12 @@ glyria.js publishes to npm straight from CI, triggered by git tags. There is no 
 | `main` | `X.Y.Z`                 | `vX.Y.Z`      | `latest`     | `npm install @glyria/bot`         |
 | `dev`  | `X.Y.Z-dev.N`           | `vX.Y.Z-dev.N`| `dev`        | `npm install @glyria/bot@dev`     |
 
-Two workflows enforce this:
+A single workflow, `.github/workflows/publish.yml`, handles both channels — npm's Trusted Publisher (OIDC) setup only allows registering one workflow file per package, so branching logic lives inside that one job instead of two separate files:
 
-- `.github/workflows/publish.yml` — triggers on tags matching `v*`, verifies the tag is on `main`, publishes to the `latest` dist-tag.
-- `.github/workflows/publish-dev.yml` — triggers on tags matching `v*-dev*`, verifies the tag is on `dev`, publishes to the `dev` dist-tag with `npm publish --tag dev`.
-
-Both workflows require the pushed commit to already be an ancestor of the corresponding branch, so a tag can't accidentally publish code that never went through review on that branch.
+- It triggers on any tag matching `v*`.
+- It inspects the tag name: if it contains `-dev`, it treats the release as a dev pre-release (branch `dev`, npm dist-tag `dev`); otherwise it's a stable release (branch `main`, npm dist-tag `latest`).
+- It verifies the pushed commit is already an ancestor of that branch before publishing, so a tag can't accidentally publish code that never went through review on that branch.
+- It publishes with `npm publish --access public --tag <dev|latest>` accordingly.
 
 ## Cutting a dev pre-release
 
