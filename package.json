@@ -1,6 +1,6 @@
 {
   "name": "@glyria/bot",
-  "version": "1.4.2-dev.0",
+  "version": "1.4.2-dev.1",
   "type": "module",
   "description": "The Discord bot framework with a clean DX — built on top of discord.js",
   "repository": {
