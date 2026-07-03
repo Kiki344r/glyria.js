@@ -10,7 +10,8 @@ const DEFAULT_SCAN_DIRS = ["utils", "composables"]
 const DEFAULT_SCAN_FILES = ["index"]
 const resolveSrcPath = (path: string) => (isDev ? `src/${path}` : `dist/src/${path}`)
 
-export const injectUserGlobals = async () => {
+export const injectUserGlobals = async (opts: { startBot?: boolean } = {}) => {
+  const { startBot = true } = opts
   await loadConfig()
   const config = useConfig()
   const scanDirs = (config.dev?.autoImportDirs ?? DEFAULT_SCAN_DIRS).map(resolveSrcPath)
@@ -82,6 +83,8 @@ export const injectUserGlobals = async () => {
     }
   }
   logger.success("Auto Imports", "Loaded globals from all files")
+  if (!startBot) return
+
   // ===== SCAN INDEX (en dernier) =====
   logger.info("Bot", `Starting bot from src/index${EXTENSION}...`)
 

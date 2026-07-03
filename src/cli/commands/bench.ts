@@ -56,8 +56,10 @@ export const bench = async (args: string[]) => {
 
   // the loader resolves .ts vs .js at import time — decide before importing it
   process.env.GLYRIA_DEV ??= "true"
-  const { loadConfig } = await import("../../core/config.js")
-  await loadConfig()
+  await import("../../runtime/env.js")
+  await import("../../runtime/globals.js")
+  const { injectUserGlobals } = await import("../../runtime/userGlobals.js")
+  await injectUserGlobals({ startBot: false })
   const { loadCommands } = await import("../../core/loader.js")
   const commands = await loadCommands()
   const handlers = commands.flatMap((c) => c.handlers)
