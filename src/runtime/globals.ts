@@ -6,7 +6,12 @@ import {
 } from "../builders/commandBuilder.js"
 import { GlyriaEvent } from "../builders/eventBuilder.js"
 import { EmbedV2Builder } from "../builders/embedV2Builder.js"
+import { GlyriaButton, GlyriaSelect, GlyriaModal } from "../builders/componentBuilder.js"
 import { defineGlyriaConfig } from "../core/config.js"
+import { defineModule, defineCommand, defineEvent, defineHook } from "../sdk/defineModule.js"
+import { createTestContext } from "../sdk/testContext.js"
+import { useStore } from "../core/store.js"
+import { canvas } from "../core/canvas/index.js"
 import { Events } from "discord.js"
 import { createReplyableContext } from "../core/context/ReplyableContext.js"
 import { hexToNumber } from "../utils/hexToNumber.js"
@@ -31,4 +36,14 @@ Object.assign(globalThis, {
   djs,
   useCommands,
   logger,
+  GlyriaButton,
+  GlyriaSelect,
+  GlyriaModal,
+  defineModule,
+  defineCommand,
+  defineEvent,
+  defineHook,
+  createTestContext,
+  useStore,
+  canvas,
 })

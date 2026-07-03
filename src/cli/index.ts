@@ -35,6 +35,33 @@ switch (cmd) {
     start(enableModuleSDK)
     break
   }
+  case "module": {
+    const { moduleCommand } = await import("./commands/module.js")
+    await moduleCommand(args.filter((a) => !a.startsWith("--")).slice(1))
+    break
+  }
+  case "reload": {
+    const { reload } = await import("./commands/reload.js")
+    reload()
+    break
+  }
+  case "replay": {
+    const { replay } = await import("./commands/replay.js")
+    await replay(args.slice(args.indexOf("replay") + 1))
+    break
+  }
+  case "bench": {
+    const { bench } = await import("./commands/bench.js")
+    await bench(args.slice(args.indexOf("bench") + 1))
+    break
+  }
+  case "studio": {
+    const { studio } = await import("./commands/studio.js")
+    await studio(args.slice(args.indexOf("studio") + 1))
+    break
+  }
   default:
-    console.log("Usage: glyria <init|dev|build|start|generate> [--module]")
+    console.log(
+      "Usage: glyria <init|dev|build|start|generate|module|reload|replay|bench|studio> [--module]",
+    )
 }

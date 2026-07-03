@@ -12,6 +12,8 @@ import type { AnyArgs } from "../types/handlers.js"
 
 import { logger } from "../core/logger.js"
 
+import { createReplyableContext } from "../core/context/ReplyableContext.js"
+
 export class EventManager {
   private client?: GlyriaClient
 
@@ -118,7 +120,13 @@ export class EventManager {
     for (const event of this.events) {
       const listener = async (...args: AnyArgs) => {
         try {
-          await event.handler(...args)
+          // any replyable payload (message, interaction) gets ctx.g for free
+          const wrapped = args.map((arg) =>
+            arg && typeof (arg as { reply?: unknown }).reply === "function"
+              ? createReplyableContext(arg as Parameters<typeof createReplyableContext>[0])
+              : arg,
+          )
+          await event.handler(...(wrapped as AnyArgs))
         } catch (error) {
           logger.error("Events Manager", `Error in event ${event.name}`)
 

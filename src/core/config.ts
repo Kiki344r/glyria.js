@@ -3,9 +3,22 @@ import { resolve } from "path"
 import { existsSync } from "fs"
 import type { HexColorString } from "discord.js"
 import { createJiti } from "jiti"
+import type { StoreConfig } from "./store.js"
 
 export interface GlyriaConfig {
   modules?: string[]
+  /** Per-module configuration, validated by each module's `config` schema. */
+  moduleConfig?: Record<string, unknown>
+  /** Channel id where ctx.g.log() and framework notices are posted. */
+  logChannel?: string
+  /** Built-in state store (ctx.g.store). Defaults to in-memory. */
+  store?: StoreConfig
+  /** Record interactions to .glyria/interactions for `glyria replay`. Always on in dev. */
+  recording?: boolean
+  /** Post a command changelog to this channel on every deployment. */
+  changelog?: {
+    channel?: string
+  }
   dev?: {
     autoImportDirs?: string[]
     restartPaths?: string[]

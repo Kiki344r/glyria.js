@@ -59,6 +59,21 @@ export const dev = (enableModuleSDK = false) => {
       return
     }
 
+    // Hot reload components
+    if (cleanFilename.startsWith("components")) {
+      proc.send?.({ type: "hotreload:components" })
+      return
+    }
+
+    // Hot reload modules (module commands/events also reload their own manager)
+    if (cleanFilename.startsWith("modules")) {
+      proc.send?.({ type: "hotreload:modules" })
+      if (cleanFilename.includes("/commands/")) proc.send?.({ type: "hotreload:commands" })
+      else if (cleanFilename.includes("/events/")) proc.send?.({ type: "hotreload:events" })
+      else if (cleanFilename.includes("/components/")) proc.send?.({ type: "hotreload:components" })
+      return
+    }
+
     await loadConfig()
     const config = useConfig()
 

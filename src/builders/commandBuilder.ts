@@ -1,8 +1,13 @@
+import { PermissionFlagsBits } from "discord.js"
 import type {
   ChatInputCommandInteraction,
   UserContextMenuCommandInteraction,
   MessageContextMenuCommandInteraction,
+  AutocompleteInteraction,
 } from "discord.js"
+import { normalizeCooldown } from "../core/guards.js"
+import type { CommandGuards, CooldownInput, PermissionName } from "../core/guards.js"
+import type { GlyriaContext } from "../core/context/ReplyableContext.js"
 
 interface Command {
   name: string
@@ -37,6 +42,7 @@ interface BaseOption {
 
 interface StringOption extends BaseOption {
   type: 3
+  autocomplete?: boolean
 }
 
 interface BooleanOption extends BaseOption {
@@ -45,10 +51,12 @@ interface BooleanOption extends BaseOption {
 
 interface IntegerOption extends BaseOption {
   type: 4
+  autocomplete?: boolean
 }
 
 interface NumberOption extends BaseOption {
   type: 10
+  autocomplete?: boolean
 }
 
 interface UserOption extends BaseOption {
@@ -78,19 +86,22 @@ type CommandHandler =
       name: string
       type: "command" | "subcommand"
       kind: "chat"
-      handler: (ctx: ChatInputCommandInteraction) => unknown
+      guards?: CommandGuards
+      handler: (ctx: GlyriaContext<ChatInputCommandInteraction>) => unknown
     }
   | {
       name: string
       type: "command" | "subcommand"
       kind: "user"
-      handler: (ctx: UserContextMenuCommandInteraction) => unknown
+      guards?: CommandGuards
+      handler: (ctx: GlyriaContext<UserContextMenuCommandInteraction>) => unknown
     }
   | {
       name: string
       type: "command" | "subcommand"
       kind: "message"
-      handler: (ctx: MessageContextMenuCommandInteraction) => unknown
+      guards?: CommandGuards
+      handler: (ctx: GlyriaContext<MessageContextMenuCommandInteraction>) => unknown
     }
 
 export interface CommandInfo {
@@ -99,8 +110,24 @@ export interface CommandInfo {
   meta: Record<string, unknown>
 }
 
+export type AutocompleteChoice = string | number | { name: string; value: string | number }
+
+export type AutocompleteHandler = (
+  query: string,
+  interaction: AutocompleteInteraction,
+) => AutocompleteChoice[] | Promise<AutocompleteChoice[]>
+
+export interface AutocompleteEntry {
+  /** `${command path}::${option name}` once fully namespaced */
+  name: string
+  handler: AutocompleteHandler
+}
+
+type AutocompletableOption = StringOption | IntegerOption | NumberOption
+
 class CommandOption<T extends BasicCommandOption> {
   protected data: T
+  protected autocompleteHandler?: AutocompleteHandler
 
   constructor(type: T["type"]) {
     this.data = { type, name: "", description: "", required: false } as T
@@ -119,6 +146,19 @@ class CommandOption<T extends BasicCommandOption> {
     return this
   }
 
+  /**
+   * Inline autocomplete: return choices (strings, numbers, or {name, value})
+   * from the current query — no separate handler file needed.
+   */
+  setAutocomplete(
+    this: CommandOption<AutocompletableOption>,
+    handler: AutocompleteHandler,
+  ): CommandOption<T> {
+    ;(this.data as AutocompletableOption).autocomplete = true
+    this.autocompleteHandler = handler
+    return this as unknown as CommandOption<T>
+  }
+
   protected build(): T {
     return this.data
   }
@@ -128,11 +168,18 @@ class CommandOptionInternal<T extends BasicCommandOption> extends CommandOption<
   override build(): T {
     return super.build()
   }
+
+  takeAutocomplete(): { option: string; handler: AutocompleteHandler } | undefined {
+    return this.autocompleteHandler
+      ? { option: this.data.name, handler: this.autocompleteHandler }
+      : undefined
+  }
 }
 
 abstract class BaseCommand {
   protected options: CommandOptionData[] = []
   protected handlers: CommandHandler[] = []
+  protected autocompletes: { option: string; handler: AutocompleteHandler }[] = []
 
   private addOption<T extends BasicCommandOption>(
     type: T["type"],
@@ -140,6 +187,9 @@ abstract class BaseCommand {
   ): this {
     const o = fn(new CommandOptionInternal<T>(type)) as CommandOptionInternal<T>
     this.options.push(o.build())
+
+    const autocomplete = o.takeAutocomplete()
+    if (autocomplete) this.autocompletes.push(autocomplete)
     return this
   }
 
@@ -165,6 +215,7 @@ abstract class BaseCommand {
 
 export class GlyriaSubCommand extends BaseCommand {
   private data = { name: "", description: "" }
+  private guards: CommandGuards = {}
 
   setName(name: string): this {
     this.data.name = name
@@ -175,7 +226,22 @@ export class GlyriaSubCommand extends BaseCommand {
     return this
   }
 
-  execute(handler: (ctx: ChatInputCommandInteraction) => unknown): this {
+  setCooldown(cooldown: CooldownInput): this {
+    this.guards.cooldown = normalizeCooldown(cooldown)
+    return this
+  }
+
+  setPermissions(permissions: PermissionName[]): this {
+    this.guards.permissions = permissions
+    return this
+  }
+
+  setOwnerOnly(ownerOnly = true): this {
+    this.guards.ownerOnly = ownerOnly
+    return this
+  }
+
+  execute(handler: (ctx: GlyriaContext<ChatInputCommandInteraction>) => unknown): this {
     this.handlers.push({ name: this.data.name, type: "subcommand", kind: "chat", handler })
     return this
   }
@@ -193,7 +259,15 @@ export class GlyriaSubCommand extends BaseCommand {
     return this.handlers.map((h) => ({
       ...h,
       name: group ? `${parent}:${group}:${h.name}` : `${parent}:${h.name}`,
+      ...(Object.keys(this.guards).length && { guards: { ...this.guards } }),
     }))
+  }
+
+  getAutocompletes(parent: string, group?: string): AutocompleteEntry[] {
+    const prefix = group
+      ? `${parent}:${group}:${this.data.name}`
+      : `${parent}:${this.data.name}`
+    return this.autocompletes.map((a) => ({ name: `${prefix}::${a.option}`, handler: a.handler }))
   }
 }
 
@@ -233,6 +307,10 @@ export class GlyriaSubCommandGroup {
       name: `${parent}:${h.name}`,
     }))
   }
+
+  getAutocompletes(parent: string): AutocompleteEntry[] {
+    return this.data.subcommands.flatMap((c) => c.getAutocompletes(parent, this.data.name))
+  }
 }
 
 const commandRegistry: CommandInfo[] = []
@@ -260,6 +338,8 @@ export class GlyriaCommand extends BaseCommand {
     default_member_permissions: undefined,
   }
   private metadata: Record<string, unknown> = {}
+  private guards: CommandGuards = {}
+  private nestedAutocompletes: AutocompleteEntry[] = []
 
   setName(name: string): this {
     this.command.name = name
@@ -281,6 +361,7 @@ export class GlyriaCommand extends BaseCommand {
     fn(cmd)
     this.command.options.push(cmd.build())
     this.handlers.push(...cmd.getHandler(this.command.name))
+    this.nestedAutocompletes.push(...cmd.getAutocompletes(this.command.name))
     return this
   }
 
@@ -289,15 +370,32 @@ export class GlyriaCommand extends BaseCommand {
     fn(group)
     this.command.options.push(group.build())
     this.handlers.push(...group.getHandler(this.command.name))
+    this.nestedAutocompletes.push(...group.getAutocompletes(this.command.name))
     return this
   }
 
-  setPermissions(permissions: bigint | number | string): this {
-    this.command.default_member_permissions = permissions.toString()
+  setPermissions(permissions: bigint | number | string | PermissionName[]): this {
+    if (Array.isArray(permissions)) {
+      this.guards.permissions = permissions
+      const bits = permissions.reduce((acc, p) => acc | PermissionFlagsBits[p], 0n)
+      this.command.default_member_permissions = bits.toString()
+    } else {
+      this.command.default_member_permissions = permissions.toString()
+    }
     return this
   }
 
-  execute(handler: (ctx: ChatInputCommandInteraction) => unknown): this {
+  setCooldown(cooldown: CooldownInput): this {
+    this.guards.cooldown = normalizeCooldown(cooldown)
+    return this
+  }
+
+  setOwnerOnly(ownerOnly = true): this {
+    this.guards.ownerOnly = ownerOnly
+    return this
+  }
+
+  execute(handler: (ctx: GlyriaContext<ChatInputCommandInteraction>) => unknown): this {
     this.handlers.push({ name: this.command.name, type: "command", kind: "chat", handler })
     return this
   }
@@ -312,7 +410,23 @@ export class GlyriaCommand extends BaseCommand {
   }
 
   getHandlers(): CommandHandler[] {
-    return this.handlers
+    // command-level guards apply to every handler; subcommand-level guards win
+    if (!Object.keys(this.guards).length) return this.handlers
+
+    return this.handlers.map((h) => ({
+      ...h,
+      guards: { ...this.guards, ...h.guards },
+    }))
+  }
+
+  getAutocompletes(): AutocompleteEntry[] {
+    return [
+      ...this.autocompletes.map((a) => ({
+        name: `${this.command.name}::${a.option}`,
+        handler: a.handler,
+      })),
+      ...this.nestedAutocompletes,
+    ]
   }
 }
 
@@ -324,6 +438,7 @@ export class GlyriaUserCommand {
   }
   private handlers: CommandHandler[] = []
   private metadata: Record<string, unknown> = {}
+  private guards: CommandGuards = {}
 
   setName(name: string): this {
     this.data.name = name
@@ -335,12 +450,28 @@ export class GlyriaUserCommand {
     return this
   }
 
-  setPermissions(permissions: bigint | number | string): this {
-    this.data.default_member_permissions = permissions.toString()
+  setPermissions(permissions: bigint | number | string | PermissionName[]): this {
+    if (Array.isArray(permissions)) {
+      this.guards.permissions = permissions
+      const bits = permissions.reduce((acc, p) => acc | PermissionFlagsBits[p], 0n)
+      this.data.default_member_permissions = bits.toString()
+    } else {
+      this.data.default_member_permissions = permissions.toString()
+    }
     return this
   }
 
-  execute(handler: (ctx: UserContextMenuCommandInteraction) => unknown): this {
+  setCooldown(cooldown: CooldownInput): this {
+    this.guards.cooldown = normalizeCooldown(cooldown)
+    return this
+  }
+
+  setOwnerOnly(ownerOnly = true): this {
+    this.guards.ownerOnly = ownerOnly
+    return this
+  }
+
+  execute(handler: (ctx: GlyriaContext<UserContextMenuCommandInteraction>) => unknown): this {
     this.handlers.push({ name: this.data.name, type: "command", kind: "user", handler })
     return this
   }
@@ -351,7 +482,9 @@ export class GlyriaUserCommand {
   }
 
   getHandlers(): CommandHandler[] {
-    return this.handlers
+    if (!Object.keys(this.guards).length) return this.handlers
+
+    return this.handlers.map((h) => ({ ...h, guards: { ...this.guards, ...h.guards } }))
   }
 }
 
@@ -363,6 +496,7 @@ export class GlyriaMessageCommand {
   }
   private handlers: CommandHandler[] = []
   private metadata: Record<string, unknown> = {}
+  private guards: CommandGuards = {}
 
   setName(name: string): this {
     this.data.name = name
@@ -374,12 +508,28 @@ export class GlyriaMessageCommand {
     return this
   }
 
-  setPermissions(permissions: bigint | number | string): this {
-    this.data.default_member_permissions = permissions.toString()
+  setPermissions(permissions: bigint | number | string | PermissionName[]): this {
+    if (Array.isArray(permissions)) {
+      this.guards.permissions = permissions
+      const bits = permissions.reduce((acc, p) => acc | PermissionFlagsBits[p], 0n)
+      this.data.default_member_permissions = bits.toString()
+    } else {
+      this.data.default_member_permissions = permissions.toString()
+    }
     return this
   }
 
-  execute(handler: (ctx: MessageContextMenuCommandInteraction) => unknown): this {
+  setCooldown(cooldown: CooldownInput): this {
+    this.guards.cooldown = normalizeCooldown(cooldown)
+    return this
+  }
+
+  setOwnerOnly(ownerOnly = true): this {
+    this.guards.ownerOnly = ownerOnly
+    return this
+  }
+
+  execute(handler: (ctx: GlyriaContext<MessageContextMenuCommandInteraction>) => unknown): this {
     this.handlers.push({ name: this.data.name, type: "command", kind: "message", handler })
     return this
   }
@@ -390,7 +540,9 @@ export class GlyriaMessageCommand {
   }
 
   getHandlers(): CommandHandler[] {
-    return this.handlers
+    if (!Object.keys(this.guards).length) return this.handlers
+
+    return this.handlers.map((h) => ({ ...h, guards: { ...this.guards, ...h.guards } }))
   }
 }
 
